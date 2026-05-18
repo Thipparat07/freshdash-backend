@@ -27,11 +27,29 @@ app.get('/', (req, res) => {
 });
 
 // Protected Profile Demo Route
-app.get('/api/profile', protect, (req, res) => {
-  res.json({
-    message: 'เข้าถึงข้อมูลโปรไฟล์ที่ได้รับการปกป้องสำเร็จ!',
-    user: req.user
-  });
+app.get('/api/profile', protect, async (req, res) => {
+  try {
+    const fullUser = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: {
+        riderProfile: true,
+        riderVehicles: { where: { isActive: true } }
+      }
+    });
+    
+    // Respond excluding password for security
+    if (fullUser) {
+      delete fullUser.password;
+    }
+
+    res.json({
+      message: 'เข้าถึงข้อมูลโปรไฟล์ที่ได้รับการปกป้องสำเร็จ!',
+      user: fullUser
+    });
+  } catch (error) {
+    console.error('❌ Get Profile Error:', error);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดในการโหลดข้อมูลโปรไฟล์' });
+  }
 });
 
 // Global Error Handler Middleware

@@ -156,7 +156,49 @@ const login = async (req, res) => {
   }
 };
 
+/**
+ * @desc    Update Rider online status
+ * @route   PATCH /api/auth/rider/status
+ * @access  Private (Rider Only)
+ */
+const updateRiderStatus = async (req, res) => {
+  const { status } = req.body;
+  const riderId = req.user.id;
+
+  try {
+    if (req.user.role !== 'rider' && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'เฉพาะไรเดอร์เท่านั้นที่สามารถอัปเดตสถานะได้' });
+    }
+
+    const validStatuses = ['online', 'offline', 'busy'];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ message: 'สถานะไม่ถูกต้อง' });
+    }
+
+    const updatedProfile = await prisma.riderProfile.update({
+      where: { id: riderId },
+      data: {
+        status,
+        lastOnlineAt: status === 'online' ? new Date() : undefined
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `อัปเดตสถานะการทำงานเป็น [${status}] สำเร็จ`,
+      profile: updatedProfile
+    });
+  } catch (error) {
+    console.error('❌ Update Rider Status Error:', error);
+    return res.status(500).json({
+      message: 'เกิดข้อผิดพลาดในการอัปเดตสถานะการทำงาน',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   register,
-  login
+  login,
+  updateRiderStatus
 };
