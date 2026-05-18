@@ -1,0 +1,170 @@
+// This is your Prisma schema file
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  customer
+  rider
+  vendor
+  admin
+}
+
+enum OrderStatus {
+  pending
+  confirmed
+  preparing
+  searching_rider
+  picked_up
+  delivered
+  cancelled
+}
+
+enum RiderStatus {
+  online
+  offline
+  busy
+  suspended
+}
+
+enum DocumentStatus {
+  pending
+  verified
+  rejected
+}
+
+enum VehicleType {
+  motorcycle
+  bicycle
+  car
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  password     String
+  fullName     String
+  phoneNumber  String?   @unique
+  role         UserRole  @default(customer)
+  avatarUrl    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  riderProfile   RiderProfile?
+  riderDocuments RiderDocument[]
+  riderVehicles  RiderVehicle[]
+  ownedRestaurants Restaurant[]
+  customerOrders  Order[]         @relation("CustomerOrders")
+  riderOrders     Order[]         @relation("RiderOrders")
+  riderEarnings   RiderEarning[]
+}
+
+model RiderProfile {
+  id           String      @id @default(uuid())
+  user         User        @relation(fields: [id], references: [id], onDelete: Cascade)
+  status       RiderStatus @default(offline)
+  currentLat   Float?
+  currentLng   Float?
+  rating       Float       @default(5.0)
+  totalJobs    Int         @default(0)
+  isVerified   Boolean     @default(false)
+  lastOnlineAt DateTime?
+}
+
+model RiderDocument {
+  id           String         @id @default(uuid())
+  riderId      String
+  rider        User           @relation(fields: [riderId], references: [id], onDelete: Cascade)
+  documentType String
+  documentUrl  String
+  status       DocumentStatus @default(pending)
+  expiryDate   DateTime?
+  verifiedAt   DateTime?
+  createdAt    DateTime       @default(now())
+}
+
+model RiderVehicle {
+  id          String      @id @default(uuid())
+  riderId     String
+  rider       User        @relation(fields: [riderId], references: [id], onDelete: Cascade)
+  type        VehicleType @default(motorcycle)
+  model       String
+  plateNumber String
+  color       String?
+  isActive    Boolean     @default(true)
+}
+
+model Restaurant {
+  id          String   @id @default(uuid())
+  ownerId     String
+  owner       User     @relation(fields: [ownerId], references: [id])
+  name        String
+  address     String
+  latitude    Float?
+  longitude   Float?
+  rating      Float    @default(0.0)
+  imageUrl    String?
+  isOpen      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  menuItems   MenuItem[]
+  orders      Order[]
+}
+
+model MenuItem {
+  id           String   @id @default(uuid())
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  name         String
+  description  String?
+  price        Decimal  @db.Decimal(10, 2)
+  imageUrl     String?
+  isAvailable  Boolean  @default(true)
+  category     String?
+  orderItems   OrderItem[]
+}
+
+model Order {
+  id              String      @id @default(uuid())
+  customerId      String
+  customer        User        @relation("CustomerOrders", fields: [customerId], references: [id])
+  restaurantId    String
+  restaurant      Restaurant  @relation(fields: [restaurantId], references: [id])
+  riderId         String?
+  rider           User?       @relation("RiderOrders", fields: [riderId], references: [id])
+  status          OrderStatus @default(pending)
+  totalAmount     Decimal     @db.Decimal(10, 2)
+  deliveryFee     Decimal     @db.Decimal(10, 2) @default(0.0)
+  deliveryAddress String
+  deliveryLat     Float?
+  deliveryLng     Float?
+  createdAt       DateTime    @default(now())
+  deliveredAt     DateTime?
+  orderItems      OrderItem[]
+  earnings        RiderEarning?
+}
+
+model OrderItem {
+  id         String   @id @default(uuid())
+  orderId    String
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId String
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id])
+  quantity   Int
+  priceAtOrder Decimal @db.Decimal(10, 2)
+}
+
+model RiderEarning {
+  id        String   @id @default(uuid())
+  riderId   String
+  rider     User     @relation(fields: [riderId], references: [id])
+  orderId   String   @unique
+  order     Order    @relation(fields: [orderId], references: [id])
+  amount    Decimal  @db.Decimal(10, 2)
+  tipAmount Decimal  @db.Decimal(10, 2) @default(0.0)
+  createdAt DateTime @default(now())
+}
