@@ -1,4 +1,5 @@
 const { prisma } = require('../prisma');
+const { calculateDistance } = require('../utils/geo');
 
 /**
  * @desc    Create a new order (Customer Only)
@@ -137,11 +138,11 @@ const getOrders = async (req, res) => {
       whereClause.status = status;
     }
 
-    const orders = await prisma.order.findMany({
+    let orders = await prisma.order.findMany({
       where: whereClause,
       include: {
         restaurant: {
-          select: { name: true, address: true, imageUrl: true }
+          select: { name: true, address: true, imageUrl: true, latitude: true, longitude: true }
         },
         customer: {
           select: { fullName: true, phoneNumber: true }
@@ -161,6 +162,51 @@ const getOrders = async (req, res) => {
         createdAt: 'desc'
       }
     });
+
+    // --- FILTER BATCHED ROUTE LIMITS FOR RIDER ---
+    if (role === 'rider' && status === 'searching_rider') {
+      const activeOrders = await prisma.order.findMany({
+        where: {
+          riderId: userId,
+          status: { in: ['confirmed', 'preparing', 'picked_up'] }
+        },
+        include: { restaurant: true }
+      });
+
+      if (activeOrders.length >= 3) {
+        orders = [];
+      } else if (activeOrders.length > 0) {
+        orders = orders.filter(newOrder => {
+          if (!newOrder.restaurant?.latitude || !newOrder.restaurant?.longitude || !newOrder.deliveryLat || !newOrder.deliveryLng) {
+            return false;
+          }
+          
+          let isAlongRoute = true;
+          for (const active of activeOrders) {
+            if (!active.restaurant?.latitude || !active.restaurant?.longitude || !active.deliveryLat || !active.deliveryLng) {
+              continue;
+            }
+            
+            const restDist = calculateDistance(
+              parseFloat(newOrder.restaurant.latitude), parseFloat(newOrder.restaurant.longitude),
+              parseFloat(active.restaurant.latitude), parseFloat(active.restaurant.longitude)
+            );
+            
+            const custDist = calculateDistance(
+              newOrder.deliveryLat, newOrder.deliveryLng,
+              active.deliveryLat, active.deliveryLng
+            );
+            
+            // ถ้าร้านใหม่ หรือ จุดส่งใหม่ อยู่ห่างจากงานค้างเกิน 5 กม. ให้ซ่อน (ไม่จ่ายงาน)
+            if (restDist > 5 || custDist > 5) {
+              isAlongRoute = false;
+              break;
+            }
+          }
+          return isAlongRoute;
+        });
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -254,7 +300,8 @@ const acceptOrderJob = async (req, res) => {
 
     // 2. ดึงออเดอร์มาตรวจสอบ
     const order = await prisma.order.findUnique({
-      where: { id }
+      where: { id },
+      include: { restaurant: true }
     });
 
     if (!order) {
@@ -267,7 +314,59 @@ const acceptOrderJob = async (req, res) => {
       });
     }
 
-    // 3. อัปเดตผูกไรเดอร์เข้ากับงาน และสลับสเตตัสออเดอร์เป็น confirmed
+    // 3. ตรวจสอบการรับงานซ้อน (Batched Orders Limits)
+    const activeOrders = await prisma.order.findMany({
+      where: {
+        riderId: req.user.id,
+        status: { in: ['confirmed', 'preparing', 'picked_up'] }
+      },
+      include: { restaurant: true }
+    });
+
+    if (activeOrders.length >= 3) {
+      return res.status(400).json({
+        message: 'คุณรับงานได้สูงสุด 3 ออเดอร์เท่านั้น กรุณาจัดส่งออเดอร์ปัจจุบันให้เสร็จสิ้นก่อน'
+      });
+    }
+
+    // 4. ตรวจสอบว่าออเดอร์ใหม่อยู่ในเส้นทางเดียวกันหรือไม่ (ภายใน 5 กม.)
+    if (activeOrders.length > 0) {
+      if (!order.restaurant?.latitude || !order.restaurant?.longitude || !order.deliveryLat || !order.deliveryLng) {
+        return res.status(400).json({
+          message: 'ข้อมูลพิกัดออเดอร์ใหม่ไม่สมบูรณ์ ไม่สามารถรับเป็นงานซ้อนได้'
+        });
+      }
+
+      let isAlongRoute = true;
+      for (const active of activeOrders) {
+        if (!active.restaurant?.latitude || !active.restaurant?.longitude || !active.deliveryLat || !active.deliveryLng) {
+          continue;
+        }
+        
+        const restDist = calculateDistance(
+          parseFloat(order.restaurant.latitude), parseFloat(order.restaurant.longitude),
+          parseFloat(active.restaurant.latitude), parseFloat(active.restaurant.longitude)
+        );
+        
+        const custDist = calculateDistance(
+          order.deliveryLat, order.deliveryLng,
+          active.deliveryLat, active.deliveryLng
+        );
+        
+        if (restDist > 5 || custDist > 5) {
+          isAlongRoute = false;
+          break;
+        }
+      }
+
+      if (!isAlongRoute) {
+        return res.status(400).json({
+          message: 'ออเดอร์นี้อยู่นอกเส้นทางวิ่งงานปัจจุบันของคุณ ไม่สามารถรับซ้อนได้'
+        });
+      }
+    }
+
+    // 5. อัปเดตผูกไรเดอร์เข้ากับงาน และสลับสเตตัสออเดอร์เป็น confirmed
     const updatedOrder = await prisma.order.update({
       where: { id },
       data: {
