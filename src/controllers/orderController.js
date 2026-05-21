@@ -1,5 +1,6 @@
 const { prisma } = require('../prisma');
 const { calculateDistance } = require('../utils/geo');
+const { sendPush } = require('../utils/pushNotification');
 
 /**
  * @desc    Create a new order (Customer Only)
@@ -180,23 +181,23 @@ const getOrders = async (req, res) => {
           if (!newOrder.restaurant?.latitude || !newOrder.restaurant?.longitude || !newOrder.deliveryLat || !newOrder.deliveryLng) {
             return false;
           }
-          
+
           let isAlongRoute = true;
           for (const active of activeOrders) {
             if (!active.restaurant?.latitude || !active.restaurant?.longitude || !active.deliveryLat || !active.deliveryLng) {
               continue;
             }
-            
+
             const restDist = calculateDistance(
               parseFloat(newOrder.restaurant.latitude), parseFloat(newOrder.restaurant.longitude),
               parseFloat(active.restaurant.latitude), parseFloat(active.restaurant.longitude)
             );
-            
+
             const custDist = calculateDistance(
               newOrder.deliveryLat, newOrder.deliveryLng,
               active.deliveryLat, active.deliveryLng
             );
-            
+
             // ถ้าร้านใหม่ หรือ จุดส่งใหม่ อยู่ห่างจากงานค้างเกิน 5 กม. ให้ซ่อน (ไม่จ่ายงาน)
             if (restDist > 5 || custDist > 5) {
               isAlongRoute = false;
@@ -342,17 +343,17 @@ const acceptOrderJob = async (req, res) => {
         if (!active.restaurant?.latitude || !active.restaurant?.longitude || !active.deliveryLat || !active.deliveryLng) {
           continue;
         }
-        
+
         const restDist = calculateDistance(
           parseFloat(order.restaurant.latitude), parseFloat(order.restaurant.longitude),
           parseFloat(active.restaurant.latitude), parseFloat(active.restaurant.longitude)
         );
-        
+
         const custDist = calculateDistance(
           order.deliveryLat, order.deliveryLng,
           active.deliveryLat, active.deliveryLng
         );
-        
+
         if (restDist > 5 || custDist > 5) {
           isAlongRoute = false;
           break;
@@ -376,7 +377,7 @@ const acceptOrderJob = async (req, res) => {
       include: {
         restaurant: true,
         customer: {
-          select: { fullName: true, phoneNumber: true, email: true }
+          select: { fullName: true, phoneNumber: true, email: true, pushToken: true }
         },
         rider: {
           select: { fullName: true, phoneNumber: true }
@@ -388,6 +389,16 @@ const acceptOrderJob = async (req, res) => {
         }
       }
     });
+
+    // แจ้งลูกค้าว่าไรเดอร์รับงานแล้ว
+    if (updatedOrder.customer?.pushToken) {
+      sendPush(
+        updatedOrder.customer.pushToken,
+        '🛵 ไรเดอร์รับงานแล้ว!',
+        `${updatedOrder.rider?.fullName || 'ไรเดอร์'} กำลังเดินทางไปรับอาหารที่ ${updatedOrder.restaurant.name}`,
+        { orderId: id }
+      );
+    }
 
     return res.status(200).json({
       success: true,
@@ -453,7 +464,7 @@ const updateOrderStatus = async (req, res) => {
         include: {
           restaurant: true,
           customer: {
-            select: { fullName: true, phoneNumber: true, email: true }
+            select: { fullName: true, phoneNumber: true, email: true, pushToken: true }
           },
           rider: {
             select: { fullName: true, phoneNumber: true }
@@ -498,6 +509,17 @@ const updateOrderStatus = async (req, res) => {
 
       return resOrder;
     });
+
+    // แจ้งลูกค้าเมื่อสถานะเปลี่ยน
+    const statusMessages = {
+      preparing: '👨‍🍳 ร้านกำลังเตรียมอาหาร',
+      picked_up: '🛵 ไรเดอร์รับอาหารแล้ว กำลังเดินทางมาหาคุณ',
+      delivered: '✅ ส่งอาหารสำเร็จ! ขอบคุณที่ใช้บริการ FreshDash',
+      cancelled: '❌ ออเดอร์ถูกยกเลิก',
+    };
+    if (updatedOrder.customer?.pushToken && statusMessages[status]) {
+      sendPush(updatedOrder.customer.pushToken, 'FreshDash', statusMessages[status], { orderId: id });
+    }
 
     return res.status(200).json({
       success: true,
