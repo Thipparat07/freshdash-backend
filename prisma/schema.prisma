@@ -63,6 +63,8 @@ model User {
   customerOrders  Order[]         @relation("CustomerOrders")
   riderOrders     Order[]         @relation("RiderOrders")
   riderEarnings   RiderEarning[]
+  riderReviews    Review[]        @relation("RiderReviews")
+  customerReviews Review[]        @relation("CustomerReviews")
 }
 
 model RiderProfile {
@@ -114,6 +116,7 @@ model Restaurant {
   createdAt   DateTime @default(now())
   menuItems   MenuItem[]
   orders      Order[]
+  reviews     Review[]
 }
 
 model MenuItem {
@@ -147,6 +150,7 @@ model Order {
   deliveredAt     DateTime?
   orderItems      OrderItem[]
   earnings        RiderEarning?
+  review          Review?
 }
 
 model OrderItem {
@@ -168,4 +172,26 @@ model RiderEarning {
   amount    Decimal  @db.Decimal(10, 2)
   tipAmount Decimal  @db.Decimal(10, 2) @default(0.0)
   createdAt DateTime @default(now())
+}
+
+model Review {
+  id                String      @id @default(uuid())
+  orderId           String      @unique
+  order             Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customerId        String
+  customer          User        @relation("CustomerReviews", fields: [customerId], references: [id], onDelete: Cascade)
+  
+  // Restaurant review fields
+  restaurantId      String
+  restaurant        Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  restaurantRating  Int         // 1 to 5 stars
+  restaurantComment String?
+  
+  // Rider review fields (optional if no rider was assigned)
+  riderId           String?
+  rider             User?       @relation("RiderReviews", fields: [riderId], references: [id], onDelete: Cascade)
+  riderRating       Int?        // 1 to 5 stars
+  riderComment      String?
+  
+  createdAt         DateTime    @default(now())
 }

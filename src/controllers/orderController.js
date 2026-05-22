@@ -157,6 +157,9 @@ const getOrders = async (req, res) => {
               select: { name: true, imageUrl: true }
             }
           }
+        },
+        review: {
+          select: { id: true }
         }
       },
       orderBy: {

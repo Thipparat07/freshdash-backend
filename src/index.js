@@ -6,6 +6,7 @@ const { prisma } = require('./prisma');
 const authRoutes = require('./routes/authRoutes');
 const restaurantRoutes = require('./routes/restaurantRoutes');
 const orderRoutes = require('./routes/orderRoutes');
+const reviewRoutes = require('./routes/reviewRoutes');
 const { protect } = require('./middlewares/authMiddleware');
 const socketIO = require('./socket');
 
@@ -20,6 +21,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/restaurants', restaurantRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/reviews', reviewRoutes);
 
 // เชื่อมโยงระบบการเงินไรเดอร์ผ่าน Persistent Utility
 const {
